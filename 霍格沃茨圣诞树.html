@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>霍格沃茨魔法圣诞树</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 使用 Inter 字体作为默认字体 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+        /* 调整背景为深蓝调 */
+        body { margin: 0; overflow: hidden; background-color: #010c28; font-family: 'Inter', sans-serif; }
+        /* 确保容器占据整个视口，实现手机全屏效果 */
+        #container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; }
+        canvas { display: block; }
+
+        /* 自定义Cinzel字体用于HOGWARTS标题，增加魔法感 */
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700&display=swap');
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <!-- UI 覆盖层 - 左上角固定文本 -->
+    <div class="absolute top-0 left-0 p-4 pointer-events-none z-10">
+        <div class="text-left space-y-1">
+            <!-- 文本已修改为“懒懒” -->
+            <h2 class="text-xl md:text-2xl text-white font-sans drop-shadow-[0_0_5px_rgba(255,255,255,0.3)]">
+                懒懒
+            </h2>
+            <p class="text-sm text-yellow-300 font-sans">
+                Merry Christmas!
+            </p>
+        </div>
+    </div>
+
+    <!-- UI 覆盖层 - 底部按钮 -->
+    <div id="ui-overlay" class="absolute bottom-0 left-0 w-full p-8 flex flex-col items-center justify-center pointer-events-none z-10">
+        <div class="text-center space-y-4">
+            <!-- 保留 HOGWARTS 和地点信息 -->
+            <h1 class="text-3xl md:text-5xl text-yellow-500 font-bold tracking-widest drop-shadow-[0_0_10px_rgba(255,215,0,0.5)]" style="font-family: 'Cinzel', serif;">
+                HOGWARTS
+            </h1>
+            <p class="text-blue-200 text-opacity-80 text-sm md:text-base tracking-widest">
+                THE GREAT HALL · CHRISTMAS EVE
+            </p>
+            
+            <button id="magic-button"
+                class="pointer-events-auto mt-6 px-8 py-3 bg-black/40 backdrop-blur-md border border-yellow-600/50 text-yellow-100 rounded-full 
+                       hover:bg-yellow-900/30 hover:border-yellow-400 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,215,0,0.3)] 
+                       transition-all duration-300 group flex items-center gap-2"
+            >
+                <span id="button-text" class="text-xl">❄️ Diffindo</span>
+                <span id="button-subtext" class="text-xs uppercase tracking-widest opacity-60 group-hover:opacity-100">
+                    (施放咒语)
+                </span>
+            </button>
+            
+            <div class="text-white/30 text-xs mt-4">
+                Tip: 点击按钮或屏幕任意处施法 · 拖动旋转视角
+            </div>
+        </div>
+    </div>
+    
+    <!-- 引入 Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 全局变量 ---
+        let camera, scene, renderer, controls, clock;
+        let isExploded = false;
+        let expansionUniform;
+        let magicTreePoints; 
+        const container = document.getElementById('container');
+        const button = document.getElementById('magic-button');
+        const buttonText = document.getElementById('button-text');
+        const buttonSubText = document.getElementById('button-subtext');
+
+        // --- 魔法音频合成器 (Web Audio API) ---
+        const playMagicSound = (type) => {
+          const AudioContext = window.AudioContext || (window).webkitAudioContext;
+          if (!AudioContext) return;
+          
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+
+          const now = ctx.currentTime;
+          
+          if (type === 'explode') {
+            // 能量爆发
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(200, now);
+            osc.frequency.exponentialRampToValueAtTime(800, now + 0.5);
+            gain.gain.setValueAtTime(0.3, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 1.5);
+            osc.start(now);
+            osc.stop(now + 1.5);
+          } else {
+            // 水晶汇聚的叮当声
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(800, now);
+            osc.frequency.exponentialRampToValueAtTime(1200, now + 0.1);
+            osc.frequency.exponentialRampToValueAtTime(400, now + 1.0);
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.5, now + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 2.0);
+            
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.connect(gain2);
+            gain2.connect(ctx.destination);
+            osc2.type = 'triangle';
+            osc2.frequency.setValueAtTime(400, now);
+            osc2.frequency.linearRampToValueAtTime(600, now + 1);
+            gain2.gain.setValueAtTime(0.2, now);
+            gain2.gain.exponentialRampToValueAtTime(0.01, now + 2.0);
+            osc2.start(now);
+            osc2.stop(now + 2.0);
+            
+            osc.start(now);
+            osc.stop(now + 2.0);
+          }
+        };
+
+        // --- 着色器代码 ---
+        const ParticleShaderMaterial = {
+          vertexShader: `
+            uniform float uTime;
+            uniform float uExpansion; 
+            
+            attribute vec3 aTargetPosition;
+            attribute float aRandomSize;
+            attribute float aSpeed;
+            attribute vec3 aColor;
+            
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            // 简单的伪随机函数
+            float random(vec2 st) {
+                return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+            }
+
+            void main() {
+              vColor = aColor;
+              
+              // 树的形态 (有序)
+              vec3 treePos = aTargetPosition;
+              
+              // 增加一点树的呼吸感
+              float breathe = sin(uTime * 2.0 + treePos.y) * 0.05;
+              treePos.x += treePos.x * breathe;
+              treePos.z += treePos.z * breathe;
+
+              // 风暴形态 (混沌)
+              vec3 explosionDir = normalize(treePos) * vec3(1.0, 0.5, 1.0);
+              float noise = sin(uTime * aSpeed + treePos.x * 10.0);
+              
+              // 螺旋扩散轨迹
+              float angle = uExpansion * 10.0 * aSpeed;
+              float c = cos(angle);
+              float s = sin(angle);
+              mat2 rot = mat2(c, -s, s, c);
+              
+              vec3 stormPos = treePos;
+              stormPos.xz = rot * stormPos.xz;
+              stormPos += explosionDir * (5.0 + noise * 2.0) * uExpansion;
+              
+              // 在两种状态间混合
+              vec3 finalPos = mix(treePos, stormPos, uExpansion);
+
+              vec4 mvPosition = modelViewMatrix * vec4(finalPos, 1.0);
+              gl_Position = projectionMatrix * mvPosition;
+
+              // 距离衰减大小 - 粒子尺寸进一步增大 (从 60/30 变为 120/60)
+              gl_PointSize = (120.0 * aRandomSize + 60.0 * (1.0 - uExpansion)) * (1.0 / -mvPosition.z);
+              
+              // 爆炸时透明度变化
+              vAlpha = 1.0 - (uExpansion * 0.3);
+            }
+          `,
+          fragmentShader: `
+            varying vec3 vColor;
+            varying float vAlpha;
+
+            void main() {
+              // 创建圆形粒子
+              float r = distance(gl_PointCoord, vec2(0.5));
+              if (r > 0.5) discard;
+              
+              // 辉光核心
+              float glow = 1.0 - (r * 2.0);
+              glow = pow(glow, 1.5);
+
+              gl_FragColor = vec4(vColor * 2.0, vAlpha * glow); 
+            }
+          `
+        };
+
+        // --- 初始化函数 ---
+        function init() {
+            clock = new THREE.Clock();
+
+            // 场景
+            scene = new THREE.Scene();
+            
+            // 摄像机
+            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 2, 18);
+
+            // 渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setClearColor(0x010c28); // 设置渲染器背景色为深蓝调
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            renderer.toneMappingExposure = 2.5; 
+            container.appendChild(renderer.domElement);
+
+            // 控制器
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enablePan = false;
+            controls.enableZoom = true;
+            controls.maxPolarAngle = Math.PI / 1.8;
+            controls.minDistance = 8;
+            controls.maxDistance = 30;
+            controls.rotateSpeed = 0.5;
+
+            // 光照 - 增强蓝调氛围
+            scene.add(new THREE.AmbientLight(0x1a2b4d, 0.2)); // 深蓝 ambient light
+            scene.add(new THREE.PointLight(0x5588ff, 1.5, 25, 2)); // 蓝色光
+            scene.add(new THREE.PointLight(0xffaa00, 0.2, 0, 0)); // 暖色光作为点缀
+
+            // 创建场景元素
+            createMagicTree();
+            createFloatingCandles();
+            createGreatHallEnvironment();
+            
+            // 事件监听
+            window.addEventListener('resize', onWindowResize);
+            button.addEventListener('click', toggleMagic);
+            container.addEventListener('click', (event) => {
+                // 确保点击的不是按钮本身
+                if (event.target !== button) {
+                    toggleMagic();
+                }
+            });
+
+            animate();
+        }
+
+        // --- 场景元素创建函数 ---
+
+        function createMagicTree() {
+            const count = 6000;
+            const geometry = new THREE.BufferGeometry();
+            
+            const pos = new Float32Array(count * 3);
+            const targetPos = new Float32Array(count * 3);
+            const cols = new Float32Array(count * 3);
+            const sz = new Float32Array(count);
+            const sp = new Float32Array(count);
+            
+            // 粒子基础颜色保持为深色调 (墨绿色/深蓝)
+            const baseColor = new THREE.Color("#0f3e18"); 
+            const goldColor = new THREE.Color("#ffd700"); 
+            const houseColors = [
+              new THREE.Color("#740001"), // Gryffindor Red
+              new THREE.Color("#1a472a"), // Slytherin Green
+              new THREE.Color("#0e1a40"), // Ravenclaw Blue
+              new THREE.Color("#ecb939"), // Hufflepuff Yellow
+            ];
+
+            for (let i = 0; i < count; i++) {
+                const height = 12;
+                const radiusBase = 5;
+                const y = (Math.random() * height) - 4; 
+                const radiusAtY = ((height - (y + 4)) / height) * radiusBase;
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.random() * radiusAtY;
+                
+                const tx = Math.cos(angle) * r;
+                const tz = Math.sin(angle) * r;
+                const ty = y;
+
+                targetPos[i * 3] = tx;
+                targetPos[i * 3 + 1] = ty;
+                targetPos[i * 3 + 2] = tz;
+                pos[i * 3] = tx;
+                pos[i * 3 + 1] = ty;
+                pos[i * 3 + 2] = tz;
+
+                let c = baseColor;
+                const rand = Math.random();
+                if (rand > 0.95) c = goldColor;
+                else if (rand > 0.85) c = houseColors[Math.floor(Math.random() * 4)]; 
+                
+                cols[i * 3] = c.r;
+                cols[i * 3 + 1] = c.g;
+                cols[i * 3 + 2] = c.b;
+
+                sz[i] = Math.random();
+                sp[i] = Math.random() * 0.5 + 0.5;
+            }
+            
+            geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            geometry.setAttribute('aTargetPosition', new THREE.BufferAttribute(targetPos, 3));
+            geometry.setAttribute('aColor', new THREE.BufferAttribute(cols, 3));
+            geometry.setAttribute('aRandomSize', new THREE.BufferAttribute(sz, 1));
+            geometry.setAttribute('aSpeed', new THREE.BufferAttribute(sp, 1));
+
+            const material = new THREE.ShaderMaterial({
+                vertexShader: ParticleShaderMaterial.vertexShader,
+                fragmentShader: ParticleShaderMaterial.fragmentShader,
+                transparent: true,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                uniforms: {
+                    uTime: { value: 0 },
+                    uExpansion: { value: 0 },
+                }
+            });
+
+            expansionUniform = material.uniforms.uExpansion; // 保存引用以便在 animate 中更新
+
+            const points = new THREE.Points(geometry, material);
+            points.position.y = -2; // 整体下移
+            scene.add(points);
+            
+            magicTreePoints = points; 
+        }
+
+        function createFloatingCandles() {
+            const count = 12;
+            const radius = 8;
+            const candleGroup = new THREE.Group();
+            
+            for (let i = 0; i < count; i++) {
+                const angle = (i / count) * Math.PI * 2;
+                const x = Math.cos(angle) * radius;
+                const z = Math.sin(angle) * radius;
+                const y = 6 + Math.random() * 2;
+
+                const candle = new THREE.Group();
+                candle.userData.baseY = y;
+                candle.userData.delay = i;
+                candle.position.set(x, y, z);
+                
+                // 蜡烛主体
+                const bodyMesh = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.1, 0.1, 1, 8),
+                    new THREE.MeshStandardMaterial({ color: "#f8f4e3", emissive: "#554433" })
+                );
+                
+                // 烛火 (发光球体)
+                const fireMesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.08, 8, 8),
+                    new THREE.MeshBasicMaterial({ color: "#ffaa00", toneMapped: false })
+                );
+                fireMesh.position.y = 0.6;
+
+                // 实际光源
+                const light = new THREE.PointLight(0xffaa00, 2, 5, 2);
+                light.position.y = 0.7;
+                
+                candle.add(bodyMesh);
+                candle.add(fireMesh);
+                candle.add(light);
+                
+                candleGroup.add(candle);
+            }
+            candleGroup.name = "CANDLE_GROUP";
+            scene.add(candleGroup);
+        }
+
+        function createGreatHallEnvironment() {
+            // 模拟星空天花板 (Stars)
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsCount = 5000;
+            const starsPositions = new Float32Array(starsCount * 3);
+            const radius = 100;
+            for (let i = 0; i < starsCount; i++) {
+                // 在一个大球体内随机分布
+                const vector = new THREE.Vector3(
+                    (Math.random() * 2 - 1), 
+                    (Math.random() * 2 - 1), 
+                    (Math.random() * 2 - 1)  
+                ).normalize().multiplyScalar(Math.random() * radius * 0.5 + radius * 0.5); 
+                
+                starsPositions[i * 3] = vector.x;
+                starsPositions[i * 3 + 1] = vector.y;
+                starsPositions[i * 3 + 2] = vector.z;
+            }
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(starsPositions, 3));
+            
+            const starsMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.1, 
+                sizeAttenuation: true
+            });
+            const stars = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(stars);
+
+            // 模拟远处黑暗的哥特式墙壁 (内侧朝外的球体) - 颜色改为深蓝调
+            const backgroundMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(100, 32, 32),
+                new THREE.MeshBasicMaterial({ color: 0x010c28, side: THREE.BackSide })
+            );
+            scene.add(backgroundMesh);
+        }
+
+        // --- 交互与状态控制 ---
+        function toggleMagic() {
+            isExploded = !isExploded;
+            playMagicSound(isExploded ? 'explode' : 'implode');
+
+            // 更新按钮文本
+            if (isExploded) {
+                buttonText.textContent = "✨ Accio Tree";
+                buttonSubText.textContent = "(汇聚魔法)";
+            } else {
+                buttonText.textContent = "❄️ Diffindo";
+                buttonSubText.textContent = "(施放咒语)";
+            }
+        }
+
+        // --- 动画循环 ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            const elapsedTime = clock.getElapsedTime();
+
+            // 1. 更新粒子着色器 Uniforms
+            if (expansionUniform && magicTreePoints) { 
+                // 缓动动画 uExpansion
+                const targetExpansionValue = isExploded ? 1.0 : 0.0;
+                expansionUniform.value = THREE.MathUtils.lerp(
+                    expansionUniform.value,
+                    targetExpansionValue,
+                    0.05
+                );
+                
+                // 更新 uTime
+                magicTreePoints.material.uniforms.uTime.value = elapsedTime; 
+            }
+
+            // 2. 更新蜡烛浮动
+            const candleGroup = scene.getObjectByName("CANDLE_GROUP");
+            if (candleGroup) {
+                candleGroup.children.forEach(candle => {
+                    if (candle.userData.baseY !== undefined) {
+                        candle.position.y = candle.userData.baseY + Math.sin(elapsedTime * 2 + candle.userData.delay) * 0.5;
+                    }
+                });
+            }
+
+            // 3. 自动旋转 (树形态时)
+            if (!isExploded) {
+                controls.autoRotate = true;
+                controls.autoRotateSpeed = 0.5;
+            } else {
+                controls.autoRotate = false;
+            }
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- 窗口大小变化处理 ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 启动应用
+        window.onload = init;
+    </script>
+</body>
+</html>
